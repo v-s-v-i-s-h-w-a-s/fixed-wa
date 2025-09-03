@@ -329,10 +329,10 @@ jobs:
             # Use Python for floating point comparison instead of bc for better reliability
             set +e
             python3 -c "import sys; score = float('$PYLINT_SCORE' or '0'); threshold = float('$MIN_PYLINT_SCORE'); sys.exit(0 if score >= threshold else 1)" 2>/dev/null
-            SCORE_BELOW_THRESHOLD=$?
+            SCORE_ABOVE_THRESHOLD=$?
             set -e
             
-            if [ "$CRITICAL_ERRORS" -gt 0 ] || [ "$SCORE_BELOW_THRESHOLD" -eq 1 ]; then
+            if [ "$CRITICAL_ERRORS" -gt 0 ] || [ "$SCORE_ABOVE_THRESHOLD" -ne 0 ]; then
               echo "❌ **pylint**: Score ${PYLINT_SCORE}/10 - $ERROR_COUNT errors, $WARNING_COUNT warnings" >> analysis-report.md
               echo "pylint_status=❌ Major Issues" >> $GITHUB_OUTPUT
               echo "pylint_severity=major" >> $GITHUB_OUTPUT
