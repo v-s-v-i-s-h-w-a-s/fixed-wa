@@ -43,6 +43,10 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Install system dependencies
+          sudo apt-get update
+          sudo apt-get install -y bc
+          
           python -m pip install --upgrade pip
           # Install project dependencies if requirements.txt exists
           if [ -f requirements.txt ]; then
@@ -285,7 +289,10 @@ jobs:
           ERROR_COUNT=$(grep -c ": E[0-9][0-9][0-9][0-9]:" pylint-output.txt 2>/dev/null || echo "0")
           WARNING_COUNT=$(grep -c ": W[0-9][0-9][0-9][0-9]:" pylint-output.txt 2>/dev/null || echo "0")
           
-          if (( $(echo "$PYLINT_SCORE >= $MIN_PYLINT_SCORE" | bc -l) )); then
+          # Compare scores using Python instead of bc
+          SCORE_COMPARISON=$(python3 -c "print(1 if float('$PYLINT_SCORE') >= float('$MIN_PYLINT_SCORE') else 0)" 2>/dev/null || echo "0")
+          
+          if [ "$SCORE_COMPARISON" -eq 1 ]; then
             echo "✅ **pylint**: Score $PYLINT_SCORE/10 - meets threshold" >> analysis-report.md
             echo "pylint_status=✅ Successful" >> $GITHUB_OUTPUT
             echo "pylint_severity=none" >> $GITHUB_OUTPUT
@@ -441,14 +448,18 @@ jobs:
           COVERAGE_PERCENTAGE=$(coverage report --format=text | grep "TOTAL" | awk '{print $4}' | sed 's/%//' || echo "0")
           set -e
           
-          if (( $(echo "$COVERAGE_PERCENTAGE >= $MIN_COVERAGE_THRESHOLD" | bc -l) )); then
+          # Compare coverage using Python instead of bc
+          COVERAGE_MEETS_THRESHOLD=$(python3 -c "print(1 if float('$COVERAGE_PERCENTAGE') >= float('$MIN_COVERAGE_THRESHOLD') else 0)" 2>/dev/null || echo "0")
+          COVERAGE_CRITICALLY_LOW=$(python3 -c "print(1 if float('$COVERAGE_PERCENTAGE') < 30 else 0)" 2>/dev/null || echo "0")
+          
+          if [ "$COVERAGE_MEETS_THRESHOLD" -eq 1 ]; then
             echo "✅ **Coverage**: $COVERAGE_PERCENTAGE% - meets threshold" >> analysis-report.md
             echo "coverage_status=✅ Successful" >> $GITHUB_OUTPUT
             echo "coverage_severity=none" >> $GITHUB_OUTPUT
             SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
             echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
           else
-            if (( $(echo "$COVERAGE_PERCENTAGE < 30" | bc -l) )); then
+            if [ "$COVERAGE_CRITICALLY_LOW" -eq 1 ]; then
               echo "❌ **Coverage**: $COVERAGE_PERCENTAGE% (critically low coverage)" >> analysis-report.md
               echo "coverage_status=❌ Major Issues" >> $GITHUB_OUTPUT
               echo "coverage_severity=major" >> $GITHUB_OUTPUT
@@ -480,13 +491,18 @@ jobs:
           echo "" >> analysis-report.md
 
       - name: Generate final report
+        id: final-report
         run: |
-          # Read final counts
-          TOTAL_CHECKS=$(cat total_checks.txt)
-          SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
-          MAJOR_ISSUES=$(cat major_issues.txt)
-          MINOR_ISSUES=$(cat minor_issues.txt)
-          EXCLUDED_COUNT=$(cat excluded_count.txt)
+          # Ensure all required files exist
+          touch total_checks.txt successful_checks.txt major_issues.txt minor_issues.txt excluded_count.txt
+          touch major_issues_details.txt minor_issues_details.txt analysis-report.md
+          
+          # Read final counts with defaults
+          TOTAL_CHECKS=$(cat total_checks.txt 2>/dev/null || echo "0")
+          SUCCESSFUL_CHECKS=$(cat successful_checks.txt 2>/dev/null || echo "0")
+          MAJOR_ISSUES=$(cat major_issues.txt 2>/dev/null || echo "0")
+          MINOR_ISSUES=$(cat minor_issues.txt 2>/dev/null || echo "0")
+          EXCLUDED_COUNT=$(cat excluded_count.txt 2>/dev/null || echo "0")
           
           # Create executive summary
           {
@@ -511,14 +527,20 @@ jobs:
             
             if [ $MAJOR_ISSUES -gt 0 ]; then
               echo "### ❌ Major Issues Found:" >> final-report.md
-              cat major_issues_details.txt | sed 's/^/- /' >> final-report.md
+              if [ -s major_issues_details.txt ]; then
+                cat major_issues_details.txt | sed 's/^/- /' >> final-report.md
+              else
+                echo "- $MAJOR_ISSUES major issues detected" >> final-report.md
+              fi
               echo "" >> final-report.md
             fi
             
             if [ $MINOR_ISSUES -gt $MAX_MINOR_ISSUES ]; then
               echo "### ⚠️ Too Many Minor Issues:" >> final-report.md
               echo "- Found $MINOR_ISSUES minor issues (max allowed: $MAX_MINOR_ISSUES)" >> final-report.md
-              cat minor_issues_details.txt | sed 's/^/- /' >> final-report.md
+              if [ -s minor_issues_details.txt ]; then
+                cat minor_issues_details.txt | sed 's/^/- /' >> final-report.md
+              fi
               echo "" >> final-report.md
             fi
             
@@ -534,18 +556,18 @@ jobs:
             echo "" >> final-report.md
           fi
           
-          # Add tool results summary
+          # Add tool results summary with fallbacks
           echo "## 🔧 Tool Results" >> final-report.md
           echo "" >> final-report.md
           echo "| Tool | Status | Details |" >> final-report.md
           echo "|------|--------|---------|" >> final-report.md
-          echo "| Black | ${{ steps.black.outputs.black_status }} | Code formatting |" >> final-report.md
-          echo "| isort | ${{ steps.isort.outputs.isort_status }} | Import sorting |" >> final-report.md
-          echo "| flake8 | ${{ steps.flake8.outputs.flake8_status }} | Style & syntax |" >> final-report.md
-          echo "| pylint | ${{ steps.pylint.outputs.pylint_status }} | Code analysis |" >> final-report.md
-          echo "| mypy | ${{ steps.mypy.outputs.mypy_status }} | Type checking |" >> final-report.md
-          echo "| bandit | ${{ steps.bandit.outputs.bandit_status }} | Security analysis |" >> final-report.md
-          echo "| coverage | ${{ steps.coverage.outputs.coverage_status }} | Test coverage |" >> final-report.md
+          echo "| Black | ${{ steps.black.outputs.black_status || '❓ Unknown' }} | Code formatting |" >> final-report.md
+          echo "| isort | ${{ steps.isort.outputs.isort_status || '❓ Unknown' }} | Import sorting |" >> final-report.md
+          echo "| flake8 | ${{ steps.flake8.outputs.flake8_status || '❓ Unknown' }} | Style & syntax |" >> final-report.md
+          echo "| pylint | ${{ steps.pylint.outputs.pylint_status || '❓ Unknown' }} | Code analysis |" >> final-report.md
+          echo "| mypy | ${{ steps.mypy.outputs.mypy_status || '❓ Unknown' }} | Type checking |" >> final-report.md
+          echo "| bandit | ${{ steps.bandit.outputs.bandit_status || '❓ Unknown' }} | Security analysis |" >> final-report.md
+          echo "| coverage | ${{ steps.coverage.outputs.coverage_status || '❓ Unknown' }} | Test coverage |" >> final-report.md
           echo "" >> final-report.md
           
           # Add configuration info
@@ -556,8 +578,10 @@ jobs:
           echo "- **Min Pylint Score**: $MIN_PYLINT_SCORE" >> final-report.md
           echo "" >> final-report.md
           
-          # Combine with detailed analysis
-          cat analysis-report.md >> final-report.md
+          # Combine with detailed analysis if it exists
+          if [ -f analysis-report.md ]; then
+            cat analysis-report.md >> final-report.md
+          fi
           
           # Add timestamp
           echo "" >> final-report.md
