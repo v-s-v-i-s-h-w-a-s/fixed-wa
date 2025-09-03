@@ -55,7 +55,7 @@ jobs:
       - name: Run flake8 style check
         run: |
           echo "## flake8 Style Check" >> report.md
-          if flake8 --max-line-length=88 --extend-ignore=E203,W503 .; then
+          if flake8 --max-line-length=88 --extend-ignore=E203,W503 src/ tests/; then
             echo "✅ flake8: No style issues found" >> report.md
           else
             echo "❌ flake8: Style issues found" >> report.md

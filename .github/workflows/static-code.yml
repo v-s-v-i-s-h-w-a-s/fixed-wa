@@ -35,7 +35,33 @@ jobs:
       - name: Install static analysis tools
         run: |
           python -m pip install --upgrade pip
-          pip install black isort flake8 pylint mypy pytest coverage pytest-cov
+          
+          # Install project dependencies if they exist
+          if [ -f requirements.txt ]; then
+            echo "Installing project dependencies..."
+            pip install -r requirements.txt
+          elif [ -f pyproject.toml ]; then
+            echo "Installing from pyproject.toml..."
+            pip install .
+          fi
+          
+          # Install static analysis tools with specific versions for consistency and reliability
+          echo "Installing static analysis tools..."
+          pip install black==23.12.1 isort==5.13.2 flake8==7.0.0 pylint==3.0.3 mypy==1.8.0 pytest==7.4.4 coverage==7.4.0 pytest-cov==4.1.0
+          
+          # Verify installations and show versions for debugging
+          echo "Verifying tool installations..."
+          echo "✅ Black: $(black --version)"
+          echo "✅ isort: $(isort --version)"
+          echo "✅ flake8: $(flake8 --version)"
+          echo "✅ pylint: $(pylint --version | head -1)"
+          echo "✅ mypy: $(mypy --version)"
+          echo "✅ pytest: $(pytest --version)"
+          echo "✅ coverage: $(coverage --version)"
+          
+          # Verify installations
+          echo "Verifying tool installations..."
+          black --version && isort --version && flake8 --version && pylint --version && mypy --version && pytest --version && coverage --version
 
       - name: Initialize analysis tracking
         run: |
@@ -50,11 +76,11 @@ jobs:
           touch major_issues_details.txt
           touch minor_issues_details.txt
           
-          # Detect project structure
+          # Detect project structure - ROBUST VERSION
           echo "## 📁 Project Structure Analysis" > analysis-report.md
           echo "" >> analysis-report.md
           
-          # Find Python files
+          # Find Python files with better exclusions
           PYTHON_FILES=$(find . -name "*.py" \
             -not -path "./.*" \
             -not -path "./venv/*" \
@@ -64,14 +90,30 @@ jobs:
             -not -path "./build/*" \
             -not -path "./dist/*" \
             -not -path "./__pycache__/*" \
+            -not -path "./.pytest_cache/*" \
+            -not -path "./.mypy_cache/*" \
+            -not -path "./htmlcov/*" \
             -not -path "./node_modules/*" | wc -l)
           
           TEST_FILES=$(find . -name "*test*.py" -o -name "test_*.py" \
             -not -path "./venv/*" \
             -not -path "./env/*" \
-            -not -path "./.venv/*" | wc -l)
-            
+            -not -path "./.venv/*" \
+            -not -path "./__pycache__/*" \
+            -not -path "./.pytest_cache/*" | wc -l)
+          
+          # Detect project structure patterns
+          SOURCE_STRUCTURE=""
+          [ -d "src" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE src/"
+          [ -d "app" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE app/"
+          [ -d "lib" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE lib/"
+          [ -d "scripts" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE scripts/"
+          [ -d "tests" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE tests/"
+          [ -d "test" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE test/"
+          
           echo "- 🐍 Python files found: $PYTHON_FILES" >> analysis-report.md
+          echo "- 🧪 Test files found: $TEST_FILES" >> analysis-report.md
+          [ -n "$SOURCE_STRUCTURE" ] && echo "- 📂 Source directories: $SOURCE_STRUCTURE" >> analysis-report.md
           echo "- 🧪 Test files found: $TEST_FILES" >> analysis-report.md
           echo "" >> analysis-report.md
 
@@ -175,11 +217,31 @@ jobs:
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
           
           set +e
-          flake8 --max-line-length=88 \
-                 --ignore=E203,W503,W504 \
-                 --exclude=.git,__pycache__,.venv,venv,env,dist,build,*.egg-info,node_modules \
-                 --statistics \
-                 . > flake8-output.txt 2>&1
+          # First, identify Python source directories to avoid scanning dependencies
+          SOURCE_DIRS=""
+          for dir in src/ app/ lib/ scripts/ tests/ test/; do
+            if [ -d "$dir" ]; then
+              SOURCE_DIRS="$SOURCE_DIRS $dir"
+            fi
+          done
+          
+          # If no standard directories found, scan current directory with exclusions
+          if [ -z "$SOURCE_DIRS" ]; then
+            echo "No standard source directories found, scanning current directory with exclusions..."
+            flake8 --max-line-length=88 \
+                   --ignore=E203,W503,W504 \
+                   --exclude=.git,__pycache__,.venv,venv,env,dist,build,*.egg-info,node_modules,.pytest_cache,.mypy_cache,.tox,htmlcov \
+                   --statistics \
+                   --count \
+                   . > flake8-output.txt 2>&1
+          else
+            echo "Scanning identified source directories: $SOURCE_DIRS"
+            flake8 --max-line-length=88 \
+                   --ignore=E203,W503,W504 \
+                   --statistics \
+                   --count \
+                   $SOURCE_DIRS > flake8-output.txt 2>&1
+          fi
           FLAKE8_EXIT_CODE=$?
           set -e
           
@@ -261,10 +323,13 @@ jobs:
             
             set -e
             
-            # Determine severity based on score and critical errors
+            # Determine severity based on score and critical errors - ROBUST VERSION
             CRITICAL_ERRORS=$(grep -E "(syntax-error|undefined-variable|used-before-assignment|import-error|no-member)" pylint-output.txt | wc -l || echo "0")
             
-            if [ "$CRITICAL_ERRORS" -gt 0 ] || [ "$(echo "$PYLINT_SCORE < $MIN_PYLINT_SCORE" | bc -l 2>/dev/null || echo 0)" -eq 1 ]; then
+            # Use Python for floating point comparison instead of bc for better reliability
+            SCORE_BELOW_THRESHOLD=$(python3 -c "import sys; score = float('$PYLINT_SCORE' or '0'); threshold = float('$MIN_PYLINT_SCORE'); sys.exit(0 if score >= threshold else 1)" 2>/dev/null; echo $?)
+            
+            if [ "$CRITICAL_ERRORS" -gt 0 ] || [ "$SCORE_BELOW_THRESHOLD" -eq 1 ]; then
               echo "❌ **pylint**: Score ${PYLINT_SCORE}/10 - $ERROR_COUNT errors, $WARNING_COUNT warnings" >> analysis-report.md
               echo "pylint_status=❌ Major Issues" >> $GITHUB_OUTPUT
               echo "pylint_severity=major" >> $GITHUB_OUTPUT
@@ -368,37 +433,64 @@ jobs:
           TOTAL_CHECKS=$(cat total_checks.txt)
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
           
-          # Look for test files more comprehensively
+          # Look for test files more comprehensively - ROBUST VERSION
           TEST_FILES=$(find . \( -name "*test*.py" -o -name "test_*.py" -o -path "*/test/*" -o -path "*/tests/*" \) \
             -not -path "./venv/*" \
             -not -path "./env/*" \
             -not -path "./.venv/*" \
             -not -path "./build/*" \
-            -not -path "./dist/*")
+            -not -path "./dist/*" \
+            -not -path "./__pycache__/*" \
+            -not -path "./.pytest_cache/*" \
+            -not -path "./.mypy_cache/*")
+          
+          # Identify source directories for better coverage targeting
+          SOURCE_DIRS=""
+          for dir in src app lib scripts; do
+            if [ -d "$dir" ]; then
+              SOURCE_DIRS="$SOURCE_DIRS --cov=$dir"
+            fi
+          done
+          
+          # If no standard source dirs, use current directory
+          if [ -z "$SOURCE_DIRS" ]; then
+            SOURCE_DIRS="--cov=."
+          fi
           
           if [ -n "$TEST_FILES" ]; then
             set +e
-            # Run coverage with detailed output
-            python -m pytest --cov=. \
+            echo "Running coverage analysis with source dirs: $SOURCE_DIRS"
+            # Run coverage with robust configuration
+            python -m pytest $SOURCE_DIRS \
                              --cov-report=term-missing \
                              --cov-report=html:htmlcov \
+                             --cov-report=xml:coverage.xml \
                              --cov-fail-under=$MIN_COVERAGE_THRESHOLD \
                              --ignore=venv \
                              --ignore=env \
                              --ignore=.venv \
                              --ignore=build \
                              --ignore=dist \
+                             --ignore=.pytest_cache \
+                             --ignore=.mypy_cache \
                              -v > coverage-output.txt 2>&1
             COVERAGE_EXIT_CODE=$?
             
-            # Get detailed coverage info
-            python -m coverage report --show-missing > coverage-detailed.txt 2>&1 || echo "Coverage report failed" > coverage-detailed.txt
+            # Get detailed coverage info with fallback
+            python -m coverage report --show-missing > coverage-detailed.txt 2>&1 || {
+              echo "Standard coverage report failed, trying alternative..." > coverage-detailed.txt
+              python -m coverage report >> coverage-detailed.txt 2>&1 || echo "Coverage report unavailable" > coverage-detailed.txt
+            }
             
-            # Extract coverage percentage
-            COVERAGE_PERCENT=$(grep -o "TOTAL.*[0-9]\+%" coverage-detailed.txt | grep -o "[0-9]\+%" | grep -o "[0-9]\+" || echo "0")
+            # Extract coverage percentage with multiple fallback methods
+            COVERAGE_PERCENT=$(grep -o "TOTAL.*[0-9]\+%" coverage-detailed.txt | tail -1 | grep -o "[0-9]\+%" | grep -o "[0-9]\+" || echo "0")
+            if [ "$COVERAGE_PERCENT" = "0" ]; then
+              # Alternative extraction method
+              COVERAGE_PERCENT=$(grep "TOTAL" coverage-detailed.txt | grep -o "[0-9]\+%" | grep -o "[0-9]\+" || echo "0")
+            fi
             
-            # Count uncovered lines
-            UNCOVERED_LINES=$(grep -c "Missing" coverage-detailed.txt 2>/dev/null || echo "0")
+            # Count uncovered lines more robustly
+            UNCOVERED_LINES=$(grep -c "Missing\|MISSING" coverage-detailed.txt 2>/dev/null || echo "0")
             
             set -e
             
