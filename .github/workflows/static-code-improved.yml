@@ -1,0 +1,606 @@
+name: Improved Python Static Code Analysis
+
+on:
+  push:
+    branches: 
+      - "**"
+  pull_request:
+    branches: 
+      - "**"
+
+env:
+  # Improved Configuration - more reasonable thresholds
+  MAX_MINOR_ISSUES: 10  # Increased to allow for minor formatting issues
+  MIN_COVERAGE_THRESHOLD: 60  # Slightly reduced to 60% for initial adoption
+  MIN_PYLINT_SCORE: 6.0  # Reduced to 6.0 to allow for gradual improvement
+  PYTHON_VERSION: "3.11"  # Centralized Python version
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Install project dependencies if requirements.txt exists
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # Install static analysis tools
+          pip install black isort flake8 pylint mypy pytest coverage pytest-cov bandit safety
+
+      - name: Initialize analysis tracking
+        run: |
+          # Initialize counters
+          echo "0" > total_checks.txt
+          echo "0" > successful_checks.txt
+          echo "0" > major_issues.txt
+          echo "0" > minor_issues.txt
+          echo "0" > excluded_count.txt
+          
+          # Create issues tracking files
+          touch major_issues_details.txt
+          touch minor_issues_details.txt
+          
+          # Detect project structure
+          echo "## 📁 Project Structure Analysis" > analysis-report.md
+          echo "" >> analysis-report.md
+          
+          # Find Python files with improved exclusion patterns
+          PYTHON_FILES=$(find . -name "*.py" \
+            -not -path "./.*" \
+            -not -path "./venv/*" \
+            -not -path "./env/*" \
+            -not -path "./.venv/*" \
+            -not -path "./site-packages/*" \
+            -not -path "./build/*" \
+            -not -path "./dist/*" \
+            -not -path "./__pycache__/*" \
+            -not -path "./node_modules/*" \
+            -not -path "./.pytest_cache/*" \
+            -not -path "./.tox/*" | wc -l)
+          
+          TEST_FILES=$(find . -name "*test*.py" -o -name "test_*.py" \
+            -not -path "./venv/*" \
+            -not -path "./env/*" \
+            -not -path "./.venv/*" \
+            -not -path "./.pytest_cache/*" | wc -l)
+            
+          echo "- 🐍 Python files found: $PYTHON_FILES" >> analysis-report.md
+          echo "- 🧪 Test files found: $TEST_FILES" >> analysis-report.md
+          echo "" >> analysis-report.md
+
+      - name: Run Black (code formatting check)
+        id: black
+        run: |
+          echo "## 🖤 Black Code Formatting Check" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          black --line-length 88 --target-version py311 --check --diff . > black-output.txt 2>&1
+          BLACK_EXIT_CODE=$?
+          set -e
+          
+          if [ $BLACK_EXIT_CODE -eq 0 ]; then
+            echo "✅ **Black**: All files are properly formatted" >> analysis-report.md
+            echo "black_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "black_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            # Count formatting issues
+            FORMATTING_ISSUES=$(grep -c "would reformat" black-output.txt 2>/dev/null || echo "0")
+            if [ "$FORMATTING_ISSUES" -gt 5 ]; then
+              echo "❌ **Black**: $FORMATTING_ISSUES formatting issues found - major severity" >> analysis-report.md
+              echo "black_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "black_severity=major" >> $GITHUB_OUTPUT
+              echo "black: $FORMATTING_ISSUES major code formatting violations" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            else
+              echo "⚠️ **Black**: $FORMATTING_ISSUES formatting issues found - minor severity" >> analysis-report.md
+              echo "black_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+              echo "black_severity=minor" >> $GITHUB_OUTPUT
+              echo "black: $FORMATTING_ISSUES minor code formatting issues" >> minor_issues_details.txt
+              MINOR_ISSUES=$(cat minor_issues.txt)
+              echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+            fi
+            
+            echo "" >> analysis-report.md
+            echo "<details>" >> analysis-report.md
+            echo "<summary>View Details</summary>" >> analysis-report.md
+            echo "" >> analysis-report.md
+            echo '```diff' >> analysis-report.md
+            cat black-output.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+            echo "</details>" >> analysis-report.md
+          fi
+          echo "" >> analysis-report.md
+
+      - name: Run isort (import sorting check)
+        id: isort
+        run: |
+          echo "## 📦 isort Import Sorting Check" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          isort --check-only --diff . > isort-output.txt 2>&1
+          ISORT_EXIT_CODE=$?
+          set -e
+          
+          if [ $ISORT_EXIT_CODE -eq 0 ]; then
+            echo "✅ **isort**: All imports are properly sorted" >> analysis-report.md
+            echo "isort_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "isort_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            # Count import sorting issues
+            IMPORT_ISSUES=$(grep -c "ERROR:" isort-output.txt 2>/dev/null || echo "0")
+            if [ "$IMPORT_ISSUES" -gt 3 ]; then
+              echo "❌ **isort**: $IMPORT_ISSUES import sorting issues found - major severity" >> analysis-report.md
+              echo "isort_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "isort_severity=major" >> $GITHUB_OUTPUT
+              echo "isort: $IMPORT_ISSUES major import sorting violations" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            else
+              echo "⚠️ **isort**: $IMPORT_ISSUES import sorting issues found - minor severity" >> analysis-report.md
+              echo "isort_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+              echo "isort_severity=minor" >> $GITHUB_OUTPUT
+              echo "isort: $IMPORT_ISSUES minor import sorting issues" >> minor_issues_details.txt
+              MINOR_ISSUES=$(cat minor_issues.txt)
+              echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+            fi
+            
+            echo "" >> analysis-report.md
+            echo "<details>" >> analysis-report.md
+            echo "<summary>View Details</summary>" >> analysis-report.md
+            echo "" >> analysis-report.md
+            echo '```diff' >> analysis-report.md
+            cat isort-output.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+            echo "</details>" >> analysis-report.md
+          fi
+          echo "" >> analysis-report.md
+
+      - name: Run flake8 (style and syntax check)
+        id: flake8
+        run: |
+          echo "## 🔍 flake8 Style and Syntax Check" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          flake8 --max-line-length=88 --extend-ignore=E203,W503 --exclude=venv,env,.venv,.git,__pycache__,.pytest_cache,.tox,build,dist . > flake8-output.txt 2>&1
+          FLAKE8_EXIT_CODE=$?
+          set -e
+          
+          if [ $FLAKE8_EXIT_CODE -eq 0 ]; then
+            echo "✅ **flake8**: No style or syntax issues found" >> analysis-report.md
+            echo "flake8_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "flake8_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            # Count different types of violations
+            MAJOR_VIOLATIONS=$(grep -E "(E999|F[0-9]+|E4[0-9]+)" flake8-output.txt | wc -l 2>/dev/null || echo "0")
+            MINOR_VIOLATIONS=$(grep -vE "(E999|F[0-9]+|E4[0-9]+)" flake8-output.txt | grep ":" | wc -l 2>/dev/null || echo "0")
+            TOTAL_VIOLATIONS=$((MAJOR_VIOLATIONS + MINOR_VIOLATIONS))
+            
+            if [ "$MAJOR_VIOLATIONS" -gt 0 ]; then
+              echo "❌ **flake8**: $TOTAL_VIOLATIONS violations, $MAJOR_VIOLATIONS major violations" >> analysis-report.md
+              echo "flake8_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "flake8_severity=major" >> $GITHUB_OUTPUT
+              echo "flake8: $MAJOR_VIOLATIONS major code violations" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            elif [ "$MINOR_VIOLATIONS" -gt 5 ]; then
+              echo "❌ **flake8**: $TOTAL_VIOLATIONS violations, $MINOR_VIOLATIONS minor violations - escalated to major" >> analysis-report.md
+              echo "flake8_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "flake8_severity=major" >> $GITHUB_OUTPUT
+              echo "flake8: $MINOR_VIOLATIONS minor violations (escalated)" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            else
+              echo "⚠️ **flake8**: $TOTAL_VIOLATIONS minor violations" >> analysis-report.md
+              echo "flake8_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+              echo "flake8_severity=minor" >> $GITHUB_OUTPUT
+              echo "flake8: $MINOR_VIOLATIONS minor violations" >> minor_issues_details.txt
+              MINOR_ISSUES=$(cat minor_issues.txt)
+              echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+            fi
+            
+            echo "" >> analysis-report.md
+            echo "<details>" >> analysis-report.md
+            echo "<summary>View Details</summary>" >> analysis-report.md
+            echo "" >> analysis-report.md
+            echo '```' >> analysis-report.md
+            head -50 flake8-output.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+            
+            # Show violation summary
+            if [ -s flake8-output.txt ]; then
+              echo "" >> analysis-report.md
+              echo "**Violation Summary:**" >> analysis-report.md
+              echo '```' >> analysis-report.md
+              awk '{print $2}' flake8-output.txt | sort | uniq -c | sort -nr | head -10 >> analysis-report.md
+              echo '```' >> analysis-report.md
+            fi
+            echo "</details>" >> analysis-report.md
+          fi
+          echo "" >> analysis-report.md
+
+      - name: Run pylint (comprehensive code analysis)
+        id: pylint
+        run: |
+          echo "## 🔎 pylint Comprehensive Code Analysis" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          pylint --output-format=text --reports=no --score=yes \
+            --disable=missing-module-docstring,missing-function-docstring,missing-class-docstring \
+            --extension-pkg-whitelist=pydantic \
+            $(find . -name "*.py" -not -path "./venv/*" -not -path "./env/*" -not -path "./.venv/*" -not -path "./__pycache__/*") > pylint-output.txt 2>&1
+          PYLINT_EXIT_CODE=$?
+          set -e
+          
+          # Extract pylint score
+          PYLINT_SCORE=$(grep "Your code has been rated at" pylint-output.txt | sed 's/.*rated at \([0-9.]*\).*/\1/' || echo "0")
+          
+          # Count errors and warnings
+          ERROR_COUNT=$(grep -c ": E[0-9][0-9][0-9][0-9]:" pylint-output.txt 2>/dev/null || echo "0")
+          WARNING_COUNT=$(grep -c ": W[0-9][0-9][0-9][0-9]:" pylint-output.txt 2>/dev/null || echo "0")
+          
+          if (( $(echo "$PYLINT_SCORE >= $MIN_PYLINT_SCORE" | bc -l) )); then
+            echo "✅ **pylint**: Score $PYLINT_SCORE/10 - meets threshold" >> analysis-report.md
+            echo "pylint_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "pylint_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            echo "❌ **pylint**: Score $PYLINT_SCORE/10 - below threshold of $MIN_PYLINT_SCORE" >> analysis-report.md
+            echo "pylint_status=❌ Major Issues" >> $GITHUB_OUTPUT
+            echo "pylint_severity=major" >> $GITHUB_OUTPUT
+            echo "pylint: Score $PYLINT_SCORE/10 with $ERROR_COUNT errors" >> major_issues_details.txt
+            MAJOR_ISSUES=$(cat major_issues.txt)
+            echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+          fi
+          
+          echo "" >> analysis-report.md
+          echo "<details>" >> analysis-report.md
+          echo "<summary>View Details</summary>" >> analysis-report.md
+          echo "" >> analysis-report.md
+          echo "**Score**: $PYLINT_SCORE/10" >> analysis-report.md
+          echo "**Errors**: $ERROR_COUNT" >> analysis-report.md
+          echo "**Warnings**: $WARNING_COUNT" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          if [ -s pylint-output.txt ]; then
+            echo '```' >> analysis-report.md
+            head -30 pylint-output.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+          fi
+          echo "</details>" >> analysis-report.md
+          echo "" >> analysis-report.md
+
+      - name: Run mypy (type checking)
+        id: mypy
+        run: |
+          echo "## 🎯 mypy Type Checking" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          mypy --ignore-missing-imports --show-error-codes --no-strict-optional . > mypy-output.txt 2>&1
+          MYPY_EXIT_CODE=$?
+          set -e
+          
+          if [ $MYPY_EXIT_CODE -eq 0 ]; then
+            echo "✅ **mypy**: No type checking issues found" >> analysis-report.md
+            echo "mypy_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "mypy_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            # Count different types of mypy issues
+            ERROR_COUNT=$(grep -c "error:" mypy-output.txt 2>/dev/null || echo "0")
+            
+            if [ "$ERROR_COUNT" -gt 10 ]; then
+              echo "❌ **mypy**: $ERROR_COUNT type checking errors found - major severity" >> analysis-report.md
+              echo "mypy_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "mypy_severity=major" >> $GITHUB_OUTPUT
+              echo "mypy: $ERROR_COUNT major type checking errors" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            else
+              echo "⚠️ **mypy**: $ERROR_COUNT type checking errors found - minor severity" >> analysis-report.md
+              echo "mypy_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+              echo "mypy_severity=minor" >> $GITHUB_OUTPUT
+              echo "mypy: $ERROR_COUNT minor type checking errors" >> minor_issues_details.txt
+              MINOR_ISSUES=$(cat minor_issues.txt)
+              echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+            fi
+            
+            echo "" >> analysis-report.md
+            echo "<details>" >> analysis-report.md
+            echo "<summary>View Details</summary>" >> analysis-report.md
+            echo "" >> analysis-report.md
+            echo '```' >> analysis-report.md
+            head -20 mypy-output.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+            echo "</details>" >> analysis-report.md
+          fi
+          echo "" >> analysis-report.md
+
+      - name: Run security checks with bandit
+        id: bandit
+        run: |
+          echo "## 🔒 bandit Security Analysis" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          set +e
+          bandit -r . -f json -o bandit-output.json > bandit-text.txt 2>&1
+          BANDIT_EXIT_CODE=$?
+          set -e
+          
+          # Parse bandit results
+          if [ -f bandit-output.json ]; then
+            HIGH_ISSUES=$(python3 -c "import json; data=json.load(open('bandit-output.json')); print(len([r for r in data['results'] if r['issue_severity'] == 'HIGH']))" 2>/dev/null || echo "0")
+            MEDIUM_ISSUES=$(python3 -c "import json; data=json.load(open('bandit-output.json')); print(len([r for r in data['results'] if r['issue_severity'] == 'MEDIUM']))" 2>/dev/null || echo "0")
+            LOW_ISSUES=$(python3 -c "import json; data=json.load(open('bandit-output.json')); print(len([r for r in data['results'] if r['issue_severity'] == 'LOW']))" 2>/dev/null || echo "0")
+          else
+            HIGH_ISSUES=0
+            MEDIUM_ISSUES=0
+            LOW_ISSUES=0
+          fi
+          
+          TOTAL_SECURITY_ISSUES=$((HIGH_ISSUES + MEDIUM_ISSUES + LOW_ISSUES))
+          
+          if [ "$TOTAL_SECURITY_ISSUES" -eq 0 ]; then
+            echo "✅ **bandit**: No security issues found" >> analysis-report.md
+            echo "bandit_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "bandit_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          elif [ "$HIGH_ISSUES" -gt 0 ]; then
+            echo "❌ **bandit**: $TOTAL_SECURITY_ISSUES security issues found ($HIGH_ISSUES high, $MEDIUM_ISSUES medium, $LOW_ISSUES low)" >> analysis-report.md
+            echo "bandit_status=❌ Major Issues" >> $GITHUB_OUTPUT
+            echo "bandit_severity=major" >> $GITHUB_OUTPUT
+            echo "bandit: $HIGH_ISSUES high security issues" >> major_issues_details.txt
+            MAJOR_ISSUES=$(cat major_issues.txt)
+            echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+          else
+            echo "⚠️ **bandit**: $TOTAL_SECURITY_ISSUES security issues found ($MEDIUM_ISSUES medium, $LOW_ISSUES low)" >> analysis-report.md
+            echo "bandit_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+            echo "bandit_severity=minor" >> $GITHUB_OUTPUT
+            echo "bandit: $MEDIUM_ISSUES medium + $LOW_ISSUES low security issues" >> minor_issues_details.txt
+            MINOR_ISSUES=$(cat minor_issues.txt)
+            echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+          fi
+          echo "" >> analysis-report.md
+
+      - name: Run test coverage analysis
+        id: coverage
+        run: |
+          echo "## 📊 Code Coverage Analysis" >> analysis-report.md
+          echo "" >> analysis-report.md
+          
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
+          
+          # Set testing environment
+          export TESTING=1
+          
+          set +e
+          # Run tests with coverage
+          coverage run -m pytest tests/ > coverage-output.txt 2>&1
+          PYTEST_EXIT_CODE=$?
+          
+          # Generate coverage report
+          coverage report --show-missing > coverage-report.txt 2>&1
+          coverage html > /dev/null 2>&1
+          COVERAGE_PERCENTAGE=$(coverage report --format=text | grep "TOTAL" | awk '{print $4}' | sed 's/%//' || echo "0")
+          set -e
+          
+          if (( $(echo "$COVERAGE_PERCENTAGE >= $MIN_COVERAGE_THRESHOLD" | bc -l) )); then
+            echo "✅ **Coverage**: $COVERAGE_PERCENTAGE% - meets threshold" >> analysis-report.md
+            echo "coverage_status=✅ Successful" >> $GITHUB_OUTPUT
+            echo "coverage_severity=none" >> $GITHUB_OUTPUT
+            SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+            echo "$((SUCCESSFUL_CHECKS + 1))" > successful_checks.txt
+          else
+            if (( $(echo "$COVERAGE_PERCENTAGE < 30" | bc -l) )); then
+              echo "❌ **Coverage**: $COVERAGE_PERCENTAGE% (critically low coverage)" >> analysis-report.md
+              echo "coverage_status=❌ Major Issues" >> $GITHUB_OUTPUT
+              echo "coverage_severity=major" >> $GITHUB_OUTPUT
+              echo "coverage: $COVERAGE_PERCENTAGE% critically low coverage" >> major_issues_details.txt
+              MAJOR_ISSUES=$(cat major_issues.txt)
+              echo "$((MAJOR_ISSUES + 1))" > major_issues.txt
+            else
+              echo "⚠️ **Coverage**: $COVERAGE_PERCENTAGE% (below threshold of $MIN_COVERAGE_THRESHOLD%)" >> analysis-report.md
+              echo "coverage_status=⚠️ Minor Issues" >> $GITHUB_OUTPUT
+              echo "coverage_severity=minor" >> $GITHUB_OUTPUT
+              echo "coverage: $COVERAGE_PERCENTAGE% below threshold" >> minor_issues_details.txt
+              MINOR_ISSUES=$(cat minor_issues.txt)
+              echo "$((MINOR_ISSUES + 1))" > minor_issues.txt
+            fi
+          fi
+          
+          echo "" >> analysis-report.md
+          echo "<details>" >> analysis-report.md
+          echo "<summary>View Coverage Details</summary>" >> analysis-report.md
+          echo "" >> analysis-report.md
+          if [ -f coverage-report.txt ]; then
+            echo '```' >> analysis-report.md
+            cat coverage-report.txt >> analysis-report.md
+            echo '```' >> analysis-report.md
+          else
+            echo "Coverage report failed" >> analysis-report.md
+          fi
+          echo "</details>" >> analysis-report.md
+          echo "" >> analysis-report.md
+
+      - name: Generate final report
+        run: |
+          # Read final counts
+          TOTAL_CHECKS=$(cat total_checks.txt)
+          SUCCESSFUL_CHECKS=$(cat successful_checks.txt)
+          MAJOR_ISSUES=$(cat major_issues.txt)
+          MINOR_ISSUES=$(cat minor_issues.txt)
+          EXCLUDED_COUNT=$(cat excluded_count.txt)
+          
+          # Create executive summary
+          {
+            echo "# 🧪 Python Static Code Analysis Report"
+            echo ""
+            echo "## 📊 Executive Summary"
+            echo ""
+            echo "| Metric | Count | Status |"
+            echo "|--------|--------|--------|"
+            echo "| 🔵 Total Checks | $TOTAL_CHECKS | ℹ️ |"
+            echo "| ✅ Successful | $SUCCESSFUL_CHECKS | ✅ |"
+            echo "| ❌ Major Issues | $MAJOR_ISSUES | $([ $MAJOR_ISSUES -eq 0 ] && echo "✅" || echo "🚫") |"
+            echo "| ⚠️ Minor Issues | $MINOR_ISSUES | $([ $MINOR_ISSUES -le $MAX_MINOR_ISSUES ] && echo "✅" || echo "🚫") |"
+            echo "| ➖ Excluded | $EXCLUDED_COUNT | ℹ️ |"
+            echo ""
+          } > final-report.md
+          
+          # Determine overall status
+          if [ $MAJOR_ISSUES -gt 0 ] || [ $MINOR_ISSUES -gt $MAX_MINOR_ISSUES ]; then
+            echo "## 🚫 MERGE BLOCKED - CRITICAL ISSUES FOUND" >> final-report.md
+            echo "" >> final-report.md
+            
+            if [ $MAJOR_ISSUES -gt 0 ]; then
+              echo "### ❌ Major Issues Found:" >> final-report.md
+              cat major_issues_details.txt | sed 's/^/- /' >> final-report.md
+              echo "" >> final-report.md
+            fi
+            
+            if [ $MINOR_ISSUES -gt $MAX_MINOR_ISSUES ]; then
+              echo "### ⚠️ Too Many Minor Issues:" >> final-report.md
+              echo "- Found $MINOR_ISSUES minor issues (max allowed: $MAX_MINOR_ISSUES)" >> final-report.md
+              cat minor_issues_details.txt | sed 's/^/- /' >> final-report.md
+              echo "" >> final-report.md
+            fi
+            
+            echo "**Action Required**: Fix all major issues before merging." >> final-report.md
+            echo "" >> final-report.md
+            
+            # Set exit status for CI
+            exit 1
+          else
+            echo "## ✅ ANALYSIS PASSED - READY TO MERGE" >> final-report.md
+            echo "" >> final-report.md
+            echo "All checks completed successfully!" >> final-report.md
+            echo "" >> final-report.md
+          fi
+          
+          # Add tool results summary
+          echo "## 🔧 Tool Results" >> final-report.md
+          echo "" >> final-report.md
+          echo "| Tool | Status | Details |" >> final-report.md
+          echo "|------|--------|---------|" >> final-report.md
+          echo "| Black | ${{ steps.black.outputs.black_status }} | Code formatting |" >> final-report.md
+          echo "| isort | ${{ steps.isort.outputs.isort_status }} | Import sorting |" >> final-report.md
+          echo "| flake8 | ${{ steps.flake8.outputs.flake8_status }} | Style & syntax |" >> final-report.md
+          echo "| pylint | ${{ steps.pylint.outputs.pylint_status }} | Code analysis |" >> final-report.md
+          echo "| mypy | ${{ steps.mypy.outputs.mypy_status }} | Type checking |" >> final-report.md
+          echo "| bandit | ${{ steps.bandit.outputs.bandit_status }} | Security analysis |" >> final-report.md
+          echo "| coverage | ${{ steps.coverage.outputs.coverage_status }} | Test coverage |" >> final-report.md
+          echo "" >> final-report.md
+          
+          # Add configuration info
+          echo "## 📋 Configuration" >> final-report.md
+          echo "" >> final-report.md
+          echo "- **Max Minor Issues**: $MAX_MINOR_ISSUES" >> final-report.md
+          echo "- **Min Coverage**: $MIN_COVERAGE_THRESHOLD%" >> final-report.md
+          echo "- **Min Pylint Score**: $MIN_PYLINT_SCORE" >> final-report.md
+          echo "" >> final-report.md
+          
+          # Combine with detailed analysis
+          cat analysis-report.md >> final-report.md
+          
+          # Add timestamp
+          echo "" >> final-report.md
+          echo "---" >> final-report.md
+          echo "*Report generated on $(date -u) UTC by GitHub Actions*" >> final-report.md
+          echo "" >> final-report.md
+          echo "*Like SonarCloud for Python - Comprehensive Static Analysis*" >> final-report.md
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: coverage-reports
+          path: |
+            htmlcov/
+            coverage-report.txt
+            .coverage
+
+      - name: Upload analysis reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: analysis-reports
+          path: |
+            final-report.md
+            analysis-report.md
+            *-output.txt
+            bandit-output.json
+
+      - name: Comment PR with results
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request' && always()
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = fs.readFileSync('final-report.md', 'utf8');
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+            } catch (error) {
+              console.log('Could not create PR comment:', error);
+            }
