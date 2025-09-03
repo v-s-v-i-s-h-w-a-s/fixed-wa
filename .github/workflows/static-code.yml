@@ -497,3 +497,9 @@ jobs:
           else
             echo "✅ All static code analysis checks passed or only minor issues found"
           fi
+
+      - name: Print Static Analysis Errors
+        run: |
+          echo "Static Analysis Errors Found:"
+          cat major_issues_details.txt || echo "No major issues found."
+          cat minor_issues_details.txt || echo "No minor issues found."
