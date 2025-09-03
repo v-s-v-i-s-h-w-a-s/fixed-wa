@@ -567,7 +567,7 @@ jobs:
           echo "*Like SonarCloud for Python - Comprehensive Static Analysis*" >> final-report.md
 
       - name: Upload coverage reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-reports
@@ -577,7 +577,7 @@ jobs:
             .coverage
 
       - name: Upload analysis reports
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: analysis-reports
