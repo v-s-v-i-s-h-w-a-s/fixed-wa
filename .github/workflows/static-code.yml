@@ -2,9 +2,11 @@ name: Python Static Code Analysis
 
 on:
   push:
-    branches: ["*"]
+    branches:
+      - "**"
   pull_request:
-    branches: ["*"]
+    branches:
+      - "**"
 
 jobs:
   static-analysis:
