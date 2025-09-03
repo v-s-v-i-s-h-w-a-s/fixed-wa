@@ -16,3 +16,15 @@ def test_home_route_text():
 def test_home_route_content_type():
     tester = app.test_client()
     assert tester.get("/").content_type == "text/html; charset=utf-8"
+
+
+def test_dashboard_route_status():
+    tester = app.test_client()
+    response = tester.get("/dashboard")
+    assert response.status_code == 200
+
+
+def test_dashboard_route_text():
+    tester = app.test_client()
+    response = tester.get("/dashboard")
+    assert b"Dashboard" in response.data
