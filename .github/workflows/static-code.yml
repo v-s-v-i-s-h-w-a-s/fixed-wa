@@ -1,4 +1,22 @@
-name: Python Static Code Analysis
+name: Universal Python Static Code Analysis
+
+# 🚀 UNIVERSAL PYTHON STATIC CODE ANALYSIS WORKFLOW
+#
+# This workflow is designed to work with ANY Python project, regardless of:
+# - Framework (Django, Flask, FastAPI, etc.)
+# - Project structure (src/, app/, lib/, etc.)
+# - Dependency management (requirements.txt, pyproject.toml, Pipfile, etc.)
+# - Package layout (flat, nested, monorepo, etc.)
+#
+# ✅ Features:
+# - Complete self-contained configuration (no external config files needed)
+# - Automatic project structure detection
+# - Framework-aware analysis
+# - Comprehensive tool coverage (black, isort, flake8, pylint, mypy, coverage)
+# - Intelligent quality gates with configurable thresholds
+# - Detailed reporting and merge decision logic
+#
+# 📋 Simply copy this file to .github/workflows/ in any Python project!
 
 on:
   push:
@@ -30,27 +48,53 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
+          # Use a recent stable Python version that works with most projects
           python-version: "3.11"
 
       - name: Install static analysis tools
         run: |
           python -m pip install --upgrade pip
 
-          # Install project dependencies if they exist
+          # Install project dependencies from multiple possible sources
+          echo "🔍 Detecting project dependencies..."
+
           if [ -f requirements.txt ]; then
-            echo "Installing project dependencies..."
-            pip install -r requirements.txt || echo "Warning: Some dependencies may have failed to install"
-          elif [ -f pyproject.toml ]; then
-            echo "Installing from pyproject.toml..."
-            pip install . || echo "Warning: Project installation may have failed"
+            echo "📦 Installing from requirements.txt..."
+            pip install -r requirements.txt || echo "⚠️ Warning: Some requirements.txt dependencies may have failed to install"
+          fi
+
+          if [ -f requirements-dev.txt ]; then
+            echo "📦 Installing from requirements-dev.txt..."
+            pip install -r requirements-dev.txt || echo "⚠️ Warning: Some dev dependencies may have failed to install"
+          fi
+
+          if [ -f dev-requirements.txt ]; then
+            echo "📦 Installing from dev-requirements.txt..."
+            pip install -r dev-requirements.txt || echo "⚠️ Warning: Some dev dependencies may have failed to install"
+          fi
+
+          if [ -f pyproject.toml ]; then
+            echo "📦 Installing from pyproject.toml..."
+            pip install -e . || echo "⚠️ Warning: pyproject.toml installation may have failed"
+          fi
+
+          if [ -f setup.py ]; then
+            echo "📦 Installing from setup.py..."
+            pip install -e . || echo "⚠️ Warning: setup.py installation may have failed"
+          fi
+
+          if [ -f Pipfile ]; then
+            echo "📦 Installing pipenv and dependencies..."
+            pip install pipenv || echo "⚠️ Warning: pipenv installation failed"
+            pipenv install --dev --system || echo "⚠️ Warning: Pipfile dependencies may have failed to install"
           fi
 
           # Install static analysis tools with specific versions for consistency and reliability
-          echo "Installing static analysis tools..."
+          echo "🛠️ Installing static analysis tools..."
           pip install black==23.12.1 isort==5.13.2 flake8==7.0.0 pylint==3.0.3 mypy==1.8.0 pytest==7.4.4 coverage==7.4.0 pytest-cov==4.1.0
 
           # Verify installations and show versions for debugging
-          echo "Verifying tool installations..."
+          echo "✅ Verifying tool installations..."
           echo "✅ Black: $(black --version)"
           echo "✅ isort: $(isort --version)"
           echo "✅ flake8: $(flake8 --version)"
@@ -58,10 +102,6 @@ jobs:
           echo "✅ mypy: $(mypy --version)"
           echo "✅ pytest: $(pytest --version)"
           echo "✅ coverage: $(coverage --version)"
-
-          # Verify installations
-          echo "Verifying tool installations..."
-          black --version && isort --version && flake8 --version && pylint --version && mypy --version && pytest --version && coverage --version
 
       - name: Initialize analysis tracking
         run: |
@@ -76,45 +116,69 @@ jobs:
           touch major_issues_details.txt
           touch minor_issues_details.txt
 
-          # Detect project structure - ROBUST VERSION
+          # Detect project structure - UNIVERSAL VERSION for any Python project
           echo "## 📁 Project Structure Analysis" > analysis-report.md
           echo "" >> analysis-report.md
 
-          # Find Python files with better exclusions
+          # Find Python files with comprehensive exclusions for any project type
           PYTHON_FILES=$(find . -name "*.py" \
             -not -path "./.*" \
             -not -path "./venv/*" \
             -not -path "./env/*" \
             -not -path "./.venv/*" \
+            -not -path "./virtualenv/*" \
             -not -path "./site-packages/*" \
             -not -path "./build/*" \
             -not -path "./dist/*" \
             -not -path "./__pycache__/*" \
             -not -path "./.pytest_cache/*" \
             -not -path "./.mypy_cache/*" \
+            -not -path "./.tox/*" \
             -not -path "./htmlcov/*" \
-            -not -path "./node_modules/*" | wc -l)
+            -not -path "./node_modules/*" \
+            -not -path "./.git/*" \
+            -not -path "./migrations/*" \
+            -not -path "./alembic/*" | wc -l)
 
-          TEST_FILES=$(find . -name "*test*.py" -o -name "test_*.py" \
+          # Find test files with multiple common patterns
+          TEST_FILES=$(find . \( -name "*test*.py" -o -name "test_*.py" -o -name "*_test.py" -o -path "*/test/*" -o -path "*/tests/*" \) \
             -not -path "./venv/*" \
             -not -path "./env/*" \
             -not -path "./.venv/*" \
+            -not -path "./virtualenv/*" \
             -not -path "./__pycache__/*" \
-            -not -path "./.pytest_cache/*" | wc -l)
+            -not -path "./.pytest_cache/*" \
+            -not -path "./.git/*" | wc -l)
 
-          # Detect project structure patterns
+          # Detect common Python project structure patterns
           SOURCE_STRUCTURE=""
           [ -d "src" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE src/"
           [ -d "app" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE app/"
           [ -d "lib" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE lib/"
+          [ -d "libs" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE libs/"
+          [ -d "library" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE library/"
+          [ -d "modules" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE modules/"
+          [ -d "package" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE package/"
+          [ -d "packages" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE packages/"
           [ -d "scripts" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE scripts/"
+          [ -d "code" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE code/"
+          [ -d "core" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE core/"
+          [ -d "utils" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE utils/"
           [ -d "tests" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE tests/"
           [ -d "test" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE test/"
+          [ -d "testing" ] && SOURCE_STRUCTURE="$SOURCE_STRUCTURE testing/"
+
+          # Detect framework-specific patterns
+          FRAMEWORK_TYPE=""
+          [ -f "manage.py" ] && FRAMEWORK_TYPE="Django"
+          [ -f "app.py" ] || [ -f "main.py" ] && FRAMEWORK_TYPE="Flask/FastAPI"
+          [ -d "alembic" ] && FRAMEWORK_TYPE="$FRAMEWORK_TYPE + SQLAlchemy"
+          [ -f "setup.py" ] || [ -f "pyproject.toml" ] && FRAMEWORK_TYPE="$FRAMEWORK_TYPE + Package"
 
           echo "- 🐍 Python files found: $PYTHON_FILES" >> analysis-report.md
           echo "- 🧪 Test files found: $TEST_FILES" >> analysis-report.md
           [ -n "$SOURCE_STRUCTURE" ] && echo "- 📂 Source directories: $SOURCE_STRUCTURE" >> analysis-report.md
-          echo "- 🧪 Test files found: $TEST_FILES" >> analysis-report.md
+          [ -n "$FRAMEWORK_TYPE" ] && echo "- 🚀 Framework detected: $FRAMEWORK_TYPE" >> analysis-report.md
           echo "" >> analysis-report.md
 
       - name: Run Black (code formatting check)
@@ -239,22 +303,22 @@ jobs:
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
 
           set +e
-          # First, identify Python source directories to avoid scanning dependencies
+          # First, identify Python source directories with comprehensive detection
           SOURCE_DIRS=""
-          for dir in src/ app/ lib/ scripts/ tests/ test/; do
+          for dir in src/ app/ lib/ libs/ library/ modules/ package/ packages/ scripts/ code/ core/ utils/ tests/ test/ testing/; do
             if [ -d "$dir" ]; then
               SOURCE_DIRS="$SOURCE_DIRS $dir"
             fi
           done
 
-          # If no standard directories found, scan current directory with exclusions
+          # If no standard directories found, scan current directory with comprehensive exclusions
           if [ -z "$SOURCE_DIRS" ]; then
             echo "No standard source directories found, scanning current directory with exclusions..."
             flake8 --max-line-length=88 \
                    --max-complexity=10 \
                    --max-doc-length=72 \
                    --ignore=E203,W503,W504,E501,E701,W601,E266,E402,W291,W293,E302,E305 \
-                   --exclude=.git,__pycache__,.venv,venv,env,dist,build,*.egg-info,node_modules,.pytest_cache,.mypy_cache,.tox,htmlcov \
+                   --exclude=.git,__pycache__,.venv,venv,env,virtualenv,dist,build,*.egg-info,node_modules,.pytest_cache,.mypy_cache,.tox,htmlcov,migrations,alembic \
                    --statistics \
                    --count \
                    . > flake8-output.txt 2>&1
@@ -499,34 +563,38 @@ jobs:
           TOTAL_CHECKS=$(cat total_checks.txt)
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
 
-          # Look for test files more comprehensively - ROBUST VERSION
-          TEST_FILES=$(find . \( -name "*test*.py" -o -name "test_*.py" -o -path "*/test/*" -o -path "*/tests/*" \) \
+          # Look for test files with comprehensive patterns for any Python project
+          TEST_FILES=$(find . \( -name "*test*.py" -o -name "test_*.py" -o -name "*_test.py" -o -path "*/test/*" -o -path "*/tests/*" -o -path "*/testing/*" \) \
             -not -path "./venv/*" \
             -not -path "./env/*" \
             -not -path "./.venv/*" \
+            -not -path "./virtualenv/*" \
             -not -path "./build/*" \
             -not -path "./dist/*" \
             -not -path "./__pycache__/*" \
             -not -path "./.pytest_cache/*" \
-            -not -path "./.mypy_cache/*")
+            -not -path "./.mypy_cache/*" \
+            -not -path "./.git/*" \
+            -not -path "./migrations/*" \
+            -not -path "./alembic/*")
 
-          # Identify source directories for better coverage targeting
+          # Identify source directories for comprehensive coverage targeting
           SOURCE_DIRS=""
-          for dir in src app lib scripts; do
+          for dir in src app lib libs library modules package packages scripts code core utils; do
             if [ -d "$dir" ]; then
               SOURCE_DIRS="$SOURCE_DIRS --cov=$dir"
             fi
           done
 
-          # If no standard source dirs, use current directory
+          # If no standard source dirs, use current directory with comprehensive excludes
           if [ -z "$SOURCE_DIRS" ]; then
-            SOURCE_DIRS="--cov=."
+            SOURCE_DIRS="--cov=. --cov-config=setup.cfg"
           fi
 
           if [ -n "$TEST_FILES" ]; then
             set +e
             echo "Running coverage analysis with source dirs: $SOURCE_DIRS"
-            # Run coverage with robust configuration
+            # Run coverage with comprehensive configuration for any Python project
             python -m pytest $SOURCE_DIRS \
                              --cov-report=term-missing \
                              --cov-report=html:htmlcov \
@@ -535,10 +603,16 @@ jobs:
                              --ignore=venv \
                              --ignore=env \
                              --ignore=.venv \
+                             --ignore=virtualenv \
                              --ignore=build \
                              --ignore=dist \
                              --ignore=.pytest_cache \
                              --ignore=.mypy_cache \
+                             --ignore=.tox \
+                             --ignore=htmlcov \
+                             --ignore=migrations \
+                             --ignore=alembic \
+                             --ignore=node_modules \
                              -v > coverage-output.txt 2>&1
             COVERAGE_EXIT_CODE=$?
             
