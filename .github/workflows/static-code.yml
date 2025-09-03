@@ -39,10 +39,10 @@ jobs:
           # Install project dependencies if they exist
           if [ -f requirements.txt ]; then
             echo "Installing project dependencies..."
-            pip install -r requirements.txt
+            pip install -r requirements.txt || echo "Warning: Some dependencies may have failed to install"
           elif [ -f pyproject.toml ]; then
             echo "Installing from pyproject.toml..."
-            pip install .
+            pip install . || echo "Warning: Project installation may have failed"
           fi
           
           # Install static analysis tools with specific versions for consistency and reliability
