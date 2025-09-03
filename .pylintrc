@@ -1,0 +1,25 @@
+[MASTER]
+# Add files or directories to the blacklist
+ignore-paths=^.*/__pycache__/.*$,^.*/\.venv/.*$,^.*/venv/.*$,^.*/build/.*$,^.*/dist/.*$
+
+[MESSAGES CONTROL]
+# Disable specific messages for the entire project
+disable=missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods,wrong-import-position
+
+[IMPORTS]
+# Allow import errors for test files since they use sys.path manipulation
+ignored-modules=app
+
+[FORMAT]
+max-line-length=88
+
+[BASIC]
+# Good variable names
+good-names=i,j,k,ex,Run,_,id,db,pk,app
+
+[DESIGN]
+max-args=10
+max-locals=15
+max-returns=6
+max-branches=12
+max-statements=50
