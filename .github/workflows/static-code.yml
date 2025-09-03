@@ -327,7 +327,10 @@ jobs:
             CRITICAL_ERRORS=$(grep -E "(syntax-error|undefined-variable|used-before-assignment|import-error|no-member)" pylint-output.txt | wc -l || echo "0")
             
             # Use Python for floating point comparison instead of bc for better reliability
-            SCORE_BELOW_THRESHOLD=$(python3 -c "import sys; score = float('$PYLINT_SCORE' or '0'); threshold = float('$MIN_PYLINT_SCORE'); sys.exit(0 if score >= threshold else 1)" 2>/dev/null; echo $?)
+            set +e
+            python3 -c "import sys; score = float('$PYLINT_SCORE' or '0'); threshold = float('$MIN_PYLINT_SCORE'); sys.exit(0 if score >= threshold else 1)" 2>/dev/null
+            SCORE_BELOW_THRESHOLD=$?
+            set -e
             
             if [ "$CRITICAL_ERRORS" -gt 0 ] || [ "$SCORE_BELOW_THRESHOLD" -eq 1 ]; then
               echo "❌ **pylint**: Score ${PYLINT_SCORE}/10 - $ERROR_COUNT errors, $WARNING_COUNT warnings" >> analysis-report.md
