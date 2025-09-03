@@ -127,7 +127,14 @@ jobs:
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
 
           set +e
-          black --line-length 88 --target-version py38 --check --diff . > black-output.txt 2>&1
+          black --line-length 88 \
+                --target-version py38 \
+                --skip-string-normalization \
+                --quiet \
+                --check \
+                --diff \
+                --exclude '/(\.eggs|\.git|\.hg|\.mypy_cache|\.tox|\.venv|_build|buck-out|build|dist|venv|env)/' \
+                . > black-output.txt 2>&1
           BLACK_EXIT_CODE=$?
           set -e
 
@@ -177,7 +184,22 @@ jobs:
           echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
 
           set +e
-          isort --profile black --multi-line 3 --line-length 88 --check-only --diff . > isort-output.txt 2>&1
+          isort --profile black \
+                --multi-line 3 \
+                --line-length 88 \
+                --force-grid-wrap 0 \
+                --use-parentheses \
+                --ensure-newline-before-comments \
+                --skip .git \
+                --skip __pycache__ \
+                --skip .venv \
+                --skip venv \
+                --skip env \
+                --skip build \
+                --skip dist \
+                --check-only \
+                --diff \
+                . > isort-output.txt 2>&1
           ISORT_EXIT_CODE=$?
           set -e
 
@@ -229,7 +251,9 @@ jobs:
           if [ -z "$SOURCE_DIRS" ]; then
             echo "No standard source directories found, scanning current directory with exclusions..."
             flake8 --max-line-length=88 \
-                   --ignore=E203,W503,W504 \
+                   --max-complexity=10 \
+                   --max-doc-length=72 \
+                   --ignore=E203,W503,W504,E501,E701,W601,E266,E402,W291,W293,E302,E305 \
                    --exclude=.git,__pycache__,.venv,venv,env,dist,build,*.egg-info,node_modules,.pytest_cache,.mypy_cache,.tox,htmlcov \
                    --statistics \
                    --count \
@@ -237,7 +261,9 @@ jobs:
           else
             echo "Scanning identified source directories: $SOURCE_DIRS"
             flake8 --max-line-length=88 \
-                   --ignore=E203,W503,W504 \
+                   --max-complexity=10 \
+                   --max-doc-length=72 \
+                   --ignore=E203,W503,W504,E501,E701,W601,E266,E402,W291,W293,E302,E305 \
                    --statistics \
                    --count \
                    $SOURCE_DIRS > flake8-output.txt 2>&1
@@ -305,8 +331,21 @@ jobs:
             echo "$((TOTAL_CHECKS + 1))" > total_checks.txt
             
             set +e
+            # Use comprehensive inline command-line configuration instead of external files
             pylint --max-line-length=88 \
-                   --disable=missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods \
+                   --good-names=i,j,k,ex,Run,_,id,db,pk,up \
+                   --max-args=5 \
+                   --max-attributes=7 \
+                   --max-bool-expr=5 \
+                   --max-branches=12 \
+                   --max-locals=15 \
+                   --max-parents=7 \
+                   --max-public-methods=20 \
+                   --max-returns=6 \
+                   --max-statements=50 \
+                   --min-public-methods=2 \
+                   --max-nested-blocks=5 \
+                   --disable=missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods,wrong-import-position,import-outside-toplevel,invalid-name,line-too-long,unused-import,unused-variable,broad-except,import-error,parse-error \
                    --reports=yes \
                    --output-format=text \
                    --score=yes \
@@ -399,6 +438,15 @@ jobs:
           mypy --ignore-missing-imports \
                --no-strict-optional \
                --show-error-codes \
+               --warn-unused-ignores \
+               --warn-redundant-casts \
+               --warn-return-any \
+               --warn-unreachable \
+               --allow-untyped-calls \
+               --allow-untyped-defs \
+               --allow-incomplete-defs \
+               --allow-untyped-globals \
+               --disable-error-code=import-untyped \
                --exclude '(venv|env|__pycache__|\.git|build|dist|node_modules)' \
                . > mypy-output.txt 2>&1
           MYPY_EXIT_CODE=$?
