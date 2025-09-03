@@ -1,0 +1,49 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint with flake8
+        run: |
+          flake8 src tests
+
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=src --cov-fail-under=80
+
+      - name: Build zip artifact
+        run: |
+          zip -r weather-analytics.zip src tests requirements.txt README.md .gitignore
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-analytics-artifact
+          path: weather-analytics.zip
+
+      - name: Deploy to GitHub Pages (containerized)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./src
+          publish_branch: gh-pages
