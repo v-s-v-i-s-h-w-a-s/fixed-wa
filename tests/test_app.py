@@ -1,5 +1,5 @@
-import pytest
 from src.app import app
+import pytest
 
 def test_home_route_status():
     tester = app.test_client()
