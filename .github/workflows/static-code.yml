@@ -308,12 +308,27 @@ jobs:
             pylint --max-line-length=88 \
                    --disable=missing-module-docstring,missing-class-docstring,missing-function-docstring,too-few-public-methods \
                    --reports=yes \
-                   --output-format=parseable \
+                   --output-format=text \
+                   --score=yes \
                    $python_files > pylint-output.txt 2>&1
             PYLINT_EXIT_CODE=$?
             
-            # Extract pylint score
+            # Extract pylint score with multiple fallback methods
             PYLINT_SCORE=$(grep -o "Your code has been rated at [0-9]*\.[0-9]*" pylint-output.txt | grep -o "[0-9]*\.[0-9]*" || echo "0")
+            if [ "$PYLINT_SCORE" = "0" ]; then
+              # Alternative extraction method
+              PYLINT_SCORE=$(grep -o "rated at [0-9]*\.[0-9]*" pylint-output.txt | grep -o "[0-9]*\.[0-9]*" || echo "0")
+            fi
+            if [ "$PYLINT_SCORE" = "0" ]; then
+              # Last resort: look for score pattern anywhere
+              PYLINT_SCORE=$(grep -oE "[0-9]+\.[0-9]+/10" pylint-output.txt | head -1 | cut -d'/' -f1 || echo "0")
+            fi
+            
+            # Ensure we have a valid score
+            if [ -z "$PYLINT_SCORE" ] || [ "$PYLINT_SCORE" = "0" ]; then
+              echo "Warning: Could not extract pylint score, defaulting to 0"
+              PYLINT_SCORE="0"
+            fi
             
             # Count different severity issues
             ERROR_COUNT=$(grep -E ": E[0-9]+:" pylint-output.txt | wc -l || echo "0")
